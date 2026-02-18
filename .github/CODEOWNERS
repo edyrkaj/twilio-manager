@@ -1,0 +1,17 @@
+# CODEOWNERS
+# Each line is a file pattern followed by one or more owners.
+# Owners are automatically requested for review when someone
+# opens a pull request that modifies matching files.
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repo
+* @edyrkaj
+
+# Rust / Tauri backend
+src-tauri/ @edyrkaj
+
+# React frontend
+src/ @edyrkaj
+
+# GitHub config
+.github/ @edyrkaj
