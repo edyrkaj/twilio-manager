@@ -1,3 +1,8 @@
+# Environment / credentials — never commit the real .env
+.env
+.env.local
+.env.*.local
+
 # Logs
 logs
 *.log

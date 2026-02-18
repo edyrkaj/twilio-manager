@@ -45,12 +45,42 @@ async fn save_credentials(credentials: Credentials) -> Result<(), String> {
 #[tauri::command]
 async fn load_credentials() -> Result<Option<Credentials>, String> {
     let config_path = get_config_path()?;
-    if !config_path.exists() {
-        return Ok(None);
+    if config_path.exists() {
+        let json = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+        let creds: Credentials = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        return Ok(Some(creds));
     }
-    let json = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let creds: Credentials = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    Ok(Some(creds))
+    Ok(load_env_credentials())
+}
+
+// Load credentials from environment variables, trying .env files first.
+// Checked locations (in order):
+//   1. .env in the current working directory
+//   2. ~/.twilio-manager/.env
+// Variables: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
+fn load_env_credentials() -> Option<Credentials> {
+    // Try CWD/.env
+    dotenvy::dotenv().ok();
+
+    // Try ~/.twilio-manager/.env as a fallback
+    if let Ok(home) = std::env::var("HOME") {
+        let env_path = std::path::PathBuf::from(home)
+            .join(".twilio-manager")
+            .join(".env");
+        if env_path.exists() {
+            dotenvy::from_path(env_path).ok();
+        }
+    }
+
+    let account_sid = std::env::var("TWILIO_ACCOUNT_SID").ok()?;
+    let auth_token = std::env::var("TWILIO_AUTH_TOKEN").ok()?;
+    let from_number = std::env::var("TWILIO_FROM_NUMBER").ok()?;
+
+    Some(Credentials {
+        account_sid,
+        auth_token,
+        from_number,
+    })
 }
 
 #[tauri::command]
