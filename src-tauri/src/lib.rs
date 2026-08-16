@@ -6,6 +6,35 @@ pub struct Credentials {
     pub account_sid: String,
     pub auth_token: String,
     pub from_number: String,
+    #[serde(default)]
+    pub whatsapp_from_number: String,
+}
+
+fn format_address(channel: &str, address: &str) -> String {
+    let stripped = address
+        .trim()
+        .strip_prefix("whatsapp:")
+        .unwrap_or(address.trim());
+    if channel == "whatsapp" {
+        format!("whatsapp:{}", stripped)
+    } else {
+        stripped.to_string()
+    }
+}
+
+fn from_number_for_channel(
+    credentials: &Credentials,
+    channel: &str,
+) -> Result<String, String> {
+    if channel == "whatsapp" {
+        let number = credentials.whatsapp_from_number.trim();
+        if number.is_empty() {
+            return Err("WhatsApp from number is not configured".to_string());
+        }
+        Ok(format_address("whatsapp", number))
+    } else {
+        Ok(format_address("sms", &credentials.from_number))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -57,7 +86,8 @@ async fn load_credentials() -> Result<Option<Credentials>, String> {
 // Checked locations (in order):
 //   1. .env in the current working directory
 //   2. ~/.twilio-manager/.env
-// Variables: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
+// Variables: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER,
+//            TWILIO_WHATSAPP_FROM_NUMBER (optional)
 fn load_env_credentials() -> Option<Credentials> {
     // Try CWD/.env
     dotenvy::dotenv().ok();
@@ -80,6 +110,8 @@ fn load_env_credentials() -> Option<Credentials> {
         account_sid,
         auth_token,
         from_number,
+        whatsapp_from_number: std::env::var("TWILIO_WHATSAPP_FROM_NUMBER")
+            .unwrap_or_default(),
     })
 }
 
@@ -113,6 +145,7 @@ async fn send_message(
     credentials: Credentials,
     to: String,
     body: String,
+    channel: String,
 ) -> Result<TwilioMessage, String> {
     let client = reqwest::Client::new();
     let url = format!(
@@ -120,9 +153,11 @@ async fn send_message(
         credentials.account_sid
     );
 
+    let from = from_number_for_channel(&credentials, &channel)?;
+    let to = format_address(&channel, &to);
     let params = [
         ("To", to.as_str()),
-        ("From", credentials.from_number.as_str()),
+        ("From", from.as_str()),
         ("Body", body.as_str()),
     ];
 
@@ -156,4 +191,62 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_whatsapp_address_from_bare_number() {
+        assert_eq!(
+            format_address("whatsapp", "+15557318728"),
+            "whatsapp:+15557318728"
+        );
+    }
+
+    #[test]
+    fn does_not_double_prefix_whatsapp_addresses() {
+        assert_eq!(
+            format_address("whatsapp", "whatsapp:+15557318728"),
+            "whatsapp:+15557318728"
+        );
+    }
+
+    #[test]
+    fn strips_whatsapp_prefix_for_sms() {
+        assert_eq!(format_address("sms", "whatsapp:+15551234567"), "+15551234567");
+    }
+
+    #[test]
+    fn whatsapp_from_requires_configured_number() {
+        let creds = Credentials {
+            account_sid: "AC".into(),
+            auth_token: "tok".into(),
+            from_number: "+111".into(),
+            whatsapp_from_number: "".into(),
+        };
+        assert!(from_number_for_channel(&creds, "whatsapp").is_err());
+    }
+
+    #[test]
+    fn whatsapp_from_uses_whatsapp_number() {
+        let creds = Credentials {
+            account_sid: "AC".into(),
+            auth_token: "tok".into(),
+            from_number: "+111".into(),
+            whatsapp_from_number: "+15557318728".into(),
+        };
+        assert_eq!(
+            from_number_for_channel(&creds, "whatsapp").unwrap(),
+            "whatsapp:+15557318728"
+        );
+    }
+
+    #[test]
+    fn credentials_json_without_whatsapp_number_defaults_empty() {
+        let json = r#"{"account_sid":"AC","auth_token":"tok","from_number":"+111"}"#;
+        let creds: Credentials = serde_json::from_str(json).unwrap();
+        assert_eq!(creds.whatsapp_from_number, "");
+    }
 }

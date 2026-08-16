@@ -49,7 +49,8 @@ body {
 .header-left { display: flex; align-items: center; gap: 10px; }
 .header-logo { font-size: 18px; }
 .header-title { font-size: 15px; font-weight: 600; }
-.header-right { display: flex; gap: 8px; }
+.header-right { display: flex; gap: 8px; align-items: center; }
+.header-nav { display: flex; gap: 6px; }
 
 /* ── Buttons ── */
 .btn {

@@ -1,11 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import "./App.css";
+import {
+  type Channel,
+  filterMessagesByChannel,
+  groupConversations,
+} from "./channel";
 
 interface Credentials {
   account_sid: string;
   auth_token: string;
   from_number: string;
+  whatsapp_from_number: string;
 }
 
 interface TwilioMessage {
@@ -19,7 +25,7 @@ interface TwilioMessage {
   status: string;
 }
 
-type View = "messages" | "settings";
+type View = "messages" | "whatsapp" | "settings";
 
 function timeAgo(dateStr: string): string {
   const date = new Date(dateStr);
@@ -52,6 +58,7 @@ function TwilioApp() {
     account_sid: "",
     auth_token: "",
     from_number: "",
+    whatsapp_from_number: "",
   });
   const [savedCreds, setSavedCreds] = useState<Credentials | null>(null);
   const [messages, setMessages] = useState<TwilioMessage[]>([]);
@@ -69,9 +76,13 @@ function TwilioApp() {
       try {
         const creds = await invoke<Credentials | null>("load_credentials");
         if (creds) {
-          setSavedCreds(creds);
-          setCredentials(creds);
-          fetchMessages(creds);
+          const normalized = {
+            ...creds,
+            whatsapp_from_number: creds.whatsapp_from_number ?? "",
+          };
+          setSavedCreds(normalized);
+          setCredentials(normalized);
+          fetchMessages(normalized);
         } else {
           setView("settings");
         }
@@ -130,6 +141,7 @@ function TwilioApp() {
         credentials: savedCreds,
         to: sendTo,
         body: sendBody,
+        channel: view === "whatsapp" ? "whatsapp" : "sms",
       });
       setSendBody("");
       setSuccessMsg("Message sent!");
@@ -142,20 +154,16 @@ function TwilioApp() {
     }
   };
 
+  const channel: Channel = view === "whatsapp" ? "whatsapp" : "sms";
+  const channelMessages = filterMessagesByChannel(messages, channel);
+  const whatsappConfigured = Boolean(
+    savedCreds?.whatsapp_from_number.trim()
+  );
+  const sendDisabled =
+    sending || !savedCreds || (view === "whatsapp" && !whatsappConfigured);
+
   // Group messages into conversations by the remote party number
-  const conversations: [string, TwilioMessage[]][] = Array.from(
-    messages.reduce((acc, msg) => {
-      const partner = msg.direction.startsWith("outbound") ? msg.to : msg.from;
-      const list = acc.get(partner) ?? [];
-      list.push(msg);
-      acc.set(partner, list);
-      return acc;
-    }, new Map<string, TwilioMessage[]>())
-  ).sort(([, a], [, b]) => {
-    const tA = new Date(a[0].date_created).getTime();
-    const tB = new Date(b[0].date_created).getTime();
-    return tB - tA;
-  });
+  const conversations = groupConversations(channelMessages);
 
   const conversationMessages = (
     conversations.find(([num]) => num === selectedNumber)?.[1] ?? []
@@ -175,7 +183,27 @@ function TwilioApp() {
           <h1 className="header-title">Twilio Manager</h1>
         </div>
         <div className="header-right">
-          {savedCreds && view === "messages" && (
+          <nav className="header-nav">
+            <button
+              className={`btn ${view === "messages" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => {
+                setView("messages");
+                setSelectedNumber(null);
+              }}
+            >
+              Messages
+            </button>
+            <button
+              className={`btn ${view === "whatsapp" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => {
+                setView("whatsapp");
+                setSelectedNumber(null);
+              }}
+            >
+              WhatsApp
+            </button>
+          </nav>
+          {savedCreds && view !== "settings" && (
             <button
               className="btn btn-ghost"
               onClick={() => fetchMessages()}
@@ -250,6 +278,25 @@ function TwilioApp() {
                   required
                 />
               </label>
+              <label className="field">
+                <span>WhatsApp From Number</span>
+                <input
+                  type="text"
+                  value={credentials.whatsapp_from_number}
+                  onChange={(e) =>
+                    setCredentials({
+                      ...credentials,
+                      whatsapp_from_number: e.target.value,
+                    })
+                  }
+                  placeholder="+15557318728"
+                />
+              </label>
+              <p className="muted">
+                Incoming WhatsApp webhooks are set in Twilio Console → Numbers
+                &amp; senders → WhatsApp → Edit Sender. This app lists messages
+                by polling the Twilio API.
+              </p>
               <button type="submit" className="btn btn-primary btn-full">
                 Save &amp; Connect
               </button>
@@ -258,13 +305,15 @@ function TwilioApp() {
         </div>
       )}
 
-      {/* ── Messages view ── */}
-      {view === "messages" && (
+      {/* ── Messages / WhatsApp view ── */}
+      {view !== "settings" && (
         <div className="messages-layout">
           {/* Sidebar */}
           <aside className="sidebar">
             <div className="sidebar-head">
-              <span className="sidebar-label">Conversations</span>
+              <span className="sidebar-label">
+                {view === "whatsapp" ? "WhatsApp" : "Conversations"}
+              </span>
               <button
                 className="btn btn-xs btn-primary"
                 onClick={() => {
@@ -281,7 +330,11 @@ function TwilioApp() {
               <div className="sidebar-placeholder">Loading…</div>
             )}
             {!loading && conversations.length === 0 && (
-              <div className="sidebar-placeholder">No messages found</div>
+              <div className="sidebar-placeholder">
+                {view === "whatsapp"
+                  ? "No WhatsApp messages found"
+                  : "No messages found"}
+              </div>
             )}
 
             <ul className="conv-list">
@@ -355,7 +408,7 @@ function TwilioApp() {
                     placeholder="Type a message…"
                     required
                   />
-                  <button className="btn btn-primary" disabled={sending}>
+                  <button className="btn btn-primary" disabled={sendDisabled}>
                     {sending ? "…" : "Send"}
                   </button>
                 </form>
@@ -363,7 +416,9 @@ function TwilioApp() {
             ) : (
               <div className="center-wrap">
                 <div className="card compose-card">
-                  <h2>New Message</h2>
+                  <h2>
+                    {view === "whatsapp" ? "New WhatsApp Message" : "New Message"}
+                  </h2>
                   <form className="stack" onSubmit={handleSend}>
                     <label className="field">
                       <span>To</span>
@@ -391,13 +446,18 @@ function TwilioApp() {
                     <button
                       type="submit"
                       className="btn btn-primary btn-full"
-                      disabled={sending || !savedCreds}
+                      disabled={sendDisabled}
                     >
                       {sending ? "Sending…" : "Send Message"}
                     </button>
                     {!savedCreds && (
                       <p className="muted center">
                         Configure credentials in Settings first.
+                      </p>
+                    )}
+                    {savedCreds && view === "whatsapp" && !whatsappConfigured && (
+                      <p className="muted center">
+                        Add your WhatsApp from number in Settings first.
                       </p>
                     )}
                   </form>

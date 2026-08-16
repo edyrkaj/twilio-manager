@@ -4,14 +4,15 @@
 
 # Twilio Manager
 
-A desktop app for managing Twilio SMS from your Mac. Connect with your Account SID, Auth Token, and phone number, then browse conversations, refresh your inbox, and send new messages — credentials stay local on your machine (`~/.twilio-manager/`).
+A desktop app for managing Twilio SMS and WhatsApp from your Mac. Connect with your Account SID, Auth Token, and phone numbers, then browse conversations, refresh your inbox, and send new messages — credentials stay local on your machine (`~/.twilio-manager/`).
 
 Built with [Tauri](https://tauri.app/), React, and TypeScript.
 
 ## Features
 
 - View SMS conversations grouped by phone number
-- Send and reply to messages from your Twilio number
+- View WhatsApp conversations on a dedicated tab
+- Send and reply to messages from your Twilio SMS or WhatsApp number
 - Store credentials locally (not in the cloud)
 
 ## Getting started
